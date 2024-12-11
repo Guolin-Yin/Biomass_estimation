@@ -1,0 +1,8 @@
+
+contextily
+geopandas
+shapely
+rasterio
+h5py
+earthaccess
+rioxarray
