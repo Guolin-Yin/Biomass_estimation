@@ -59,9 +59,7 @@ def create_gedi_raster(csv_files, hls_image, output_file, if_plot=False):
         (l4adf['lat_lowestmode'] >= bound.bottom) & 
         (l4adf['lat_lowestmode'] <= bound.top) & 
         (l4adf['lon_lowestmode'] >= bound.left) & 
-        (l4adf['lon_lowestmode'] <= bound.right) & 
-        (l4adf['l4_quality_flag'] > 0) & 
-        (l4adf['agbd_se']/l4adf['agbd'] * 100 > 50)
+        (l4adf['lon_lowestmode'] <= bound.right)
     ]
 
     # Create raster
@@ -410,7 +408,7 @@ if __name__ == "__main__":
     img_dir = Path('./Dataset/V2/data')
     img_dir.mkdir(parents=True, exist_ok=True)
     csv_files = list(csv_folder.glob('**/*.csv'))
-    counter = 0
+    # counter = 0
     # for csv_file in csv_files:
     #     date = extract_gedi_date(csv_file)
 
@@ -424,8 +422,6 @@ if __name__ == "__main__":
     #         (l4adf['lon_lowestmode'] <= filtered_bounds[2]) &
     #         (l4adf['lat_lowestmode'] >= filtered_bounds[1]) &
     #         (l4adf['lat_lowestmode'] <= filtered_bounds[3]) 
-    #         # (l4adf['l4_quality_flag'] > 0) 
-    #         # (l4adf['agbd_se']/l4adf['agbd'] * 100 > 50)
     #     ]
     #     # Generate dates for 3 days before and 3 days after
     #     date_start = date - dt.timedelta(days=3)

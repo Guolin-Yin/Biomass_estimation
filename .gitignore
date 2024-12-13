@@ -25,3 +25,10 @@
 /resource/**
 /__pycache__
 /.vscode
+biomass_model.ckpt
+Dataset_V2.zip
+*.log
+*.out
+*.pyc
+**/__pycache__/**/
+

@@ -24,6 +24,7 @@ class Trainer:
 		checkpoint_dir=None,
 		max_saved_models=3,
 		is_train=True,
+		is_transfer_learning=False,
 		**kwargs
 	):
 		"""
@@ -50,19 +51,27 @@ class Trainer:
 		self.test_loader = test_loader
 		self.device = device
 		self.prefix = prefix
+		self.is_transfer_learning = is_transfer_learning
 		self.max_saved_models = max_saved_models
 		self.stage = 'training' if self.is_train else 'testing'
 		self.top_models = []
 		self.args = kwargs.get('args', None)
+		date_time = datetime.now().strftime("%Y-%m-%d->%H:%M:%S")
 		if checkpoint_dir:
 			self.checkpoint_dir = Path(checkpoint_dir)
+			info = f'Test mode in dir: {checkpoint_dir}'
 			assert self.checkpoint_dir.exists(), f"Checkpoint directory {checkpoint_dir} does not exist."
+			if self.is_transfer_learning and self.is_train:
+				self.checkpoint_dir = Path('check_points') / 'transfer_learning' / f'run_{date_time}'
+				self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+				self.start_epoch = 1
+				self._save_settings()
+				info = f"Created new checkpoint directory for transfer learning: {self.checkpoint_dir}"
 			self.logger = self._setup_logger(stage=self.stage)
-			self.logger.info(f"Using checkpoint directory: {checkpoint_dir}")
+			self.logger.info(info)
 			self._load_checkpoint()
 		else:
 			assert self.is_train, "Cannot create a checkpoint directory for a test model. you should provide a checkpoint_dir"
-			date_time = datetime.now().strftime("%Y-%m-%d->%H:%M:%S")
 			self.checkpoint_dir = Path('check_points') / self.prefix / f'run_{date_time}'
 			self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 			self.logger = self._setup_logger(stage=self.stage)	
@@ -111,7 +120,10 @@ class Trainer:
 			'checkpoint_dir': str(self.checkpoint_dir),
 			'max_saved_models': self.max_saved_models
 		}
-		settings['model_params'] = self.model.model_params
+		try:
+			settings['model_params'] = self.model.model_params
+		except:
+			settings['model_params'] = None
 		if self.args:
 			settings['args'] = vars(self.args)
 
@@ -190,8 +202,16 @@ class Trainer:
 					self.optimizer.zero_grad()
 				# Forward pass
 				outputs = self.model(x)
-				loss = self.loss_fn(outputs, y)
+				# Access .output for terratorch ModelOutput type
+				predictions = outputs.output if hasattr(outputs, 'output') else outputs
+				
+				# Apply mask to both predictions and ground truth
+				valid_mask = (y != -1)
+				valid_predictions = predictions[valid_mask]
+				valid_targets = y[valid_mask]
 
+				# Compute loss only on valid points
+				loss = self.loss_fn(valid_predictions, valid_targets)
 				if is_training:
 					loss.backward()
 					self.optimizer.step()
@@ -202,8 +222,8 @@ class Trainer:
 				if pbar:
 					pbar.set_postfix(step = batch_idx / len(data_loader), loss=total_loss / batch_idx)
 					pbar.update(1)
-				self.actuals.extend(y.clone().detach().cpu().numpy().flatten())
-				self.predictions.extend(outputs.clone().detach().cpu().numpy().flatten())
+				self.actuals.extend(valid_targets.clone().detach().cpu().numpy().flatten())
+				self.predictions.extend(valid_predictions.clone().detach().cpu().numpy().flatten())
 		# Check for early stopping
 		# Compute average loss
 		avg_loss = total_loss / len(data_loader)

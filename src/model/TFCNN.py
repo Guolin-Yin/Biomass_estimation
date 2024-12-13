@@ -46,37 +46,35 @@ class TFCNN(nn.Module):
         #     # nn.MaxPool2d(kernel_size=2, stride=2)  # Output size: (64, 3, 3)
         # )
         self.features = nn.Sequential(
-            nn.Conv1d(6, 32, kernel_size=1),  # Output: (12011, 32, 1)
+            nn.Conv2d(1, 32, kernel_size=(2,1)),  # Input: (B, 6, 1, 1) -> Output: (B, 32, 1, 1)
             nn.ReLU(),
-            nn.Conv1d(32, 64, kernel_size=1),  # Output: (12011, 64, 1)
-            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(2,1), stride=(2,1)),  # Output: (B, 32, 1, 1)
+            # nn.Conv2d(32, 64, kernel_size=(1,1)),  # Output: (B, 64, 1, 1)
+            # nn.ReLU(),
         )
-        self.regression_head = nn.Linear(64, 1)
-        # self.regression_head = nn.Sequential(
-        #             nn.Linear(64, 32),
-        #             nn.ReLU(),
-        #             nn.Linear(32, 1)
-        #         )
+        # self.regression_head = nn.Linear(64, 1)
+        self.regression_head = nn.Sequential(
+                    nn.Linear(64, 32),
+                    nn.ReLU(),
+                    nn.Linear(32, 1)
+                )
     def _get_temporal_position_embeddings(self, t):
         t = (t * 365.0001).to(torch.int64)
         t = F.one_hot(t, num_classes=366).to(torch.float32)
         t = t.reshape(-1, 366)
         return self.to_temporal_embedding_input(t)
     def forward(self, x):
-
-
         # temporal_pos_embedding = self._get_temporal_position_embeddings(time).unsqueeze(dim=0) # time -> (1, time), temporal_pos_embedding -> (1, time, channel)
 
         # x += temporal_pos_embedding
-        x = x.unsqueeze(0) # x -> (1, B <No. Pixels>, channel)
+        x = x.unsqueeze(1) # x -> (1, B <No. Pixels>, channel)
         x = self.tem_transformer(x) # x -> (1, B <No. Pixels>, channel)
-        x = x.permute(1, 2, 0) # x -> (B <No. Pixels>, channel, 1)
+        x = x.permute(0, 2, 1) # x -> (B <No. Pixels>, channel, 1)
         # x = x.permute(0, 2, 1) # x -> (1, channel, B <No. Pixels>)
         # x = self.regression_head(x)
         # x = x.squeeze(0)
-        x = self.features(x)
+        x = self.features(x.unsqueeze(1))
         x = self.regression_head(x.view(x.size(0), -1))
-
 
         return x
    
