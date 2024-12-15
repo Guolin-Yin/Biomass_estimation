@@ -31,40 +31,42 @@ class batch_process:
 def resize_to_224(image: torch.Tensor, label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Resize tensors to 224x224 using torchvision transforms.
+    When image is smaller than target: pad at the end (right/bottom)
+    When image is larger than target: crop from edges
+    
     Args:
         image (torch.Tensor): [C, H, W]
         label (torch.Tensor): [H, W] or [1, H, W]
     """
     target_size = 224
     _, h, w = image.shape
+    assert image.min() > 0, "Image has no data"
+    label = label.squeeze(0) if label.dim() == 3 else label
     
-    # For very small images, repeat the image content instead of padding
-    if w < target_size // 2 or h < target_size // 2:
-        # Calculate how many times to repeat
-        repeat_h = max(1, target_size // h + (1 if target_size % h else 0))
-        repeat_w = max(1, target_size // w + (1 if target_size % w else 0))
-        
-        # Repeat the tensors
-        image = image.repeat(1, repeat_h, repeat_w)
-        label = label.repeat(repeat_h, repeat_w) if label.dim() == 2 else label.repeat(1, repeat_h, repeat_w)
-        
-        # Now we can safely crop to exact size
-        image = center_crop(image, [target_size, target_size])
-        label = center_crop(label if label.dim() == 3 else label.unsqueeze(0), [target_size, target_size])
-    else:
-        # Original logic for images closer to target size
-        if h > target_size or w > target_size:
-            image = center_crop(image, [target_size, target_size])
-            label = center_crop(label if label.dim() == 3 else label.unsqueeze(0), [target_size, target_size])
-        elif h < target_size or w < target_size:
-            padding = [
-                (target_size - w) // 2, (target_size - h) // 2,
-                (target_size - w + 1) // 2, (target_size - h + 1) // 2
-            ]
-            image = pad(image, padding, padding_mode='reflect')
-            label = pad(label if label.dim() == 3 else label.unsqueeze(0), padding, padding_mode='reflect')
+    # Handle height
+    if h < target_size:
+        padding_h = target_size - h
+        pads = [0, 0, 0, padding_h]  # [left, right, top, bottom]
+        image = pad(image, pads, padding_mode='edge')
+        label = pad(label, pads, padding_mode='edge')
+    elif h > target_size:
+        crop_h = (h - target_size) // 2
+        image = image[:, crop_h:crop_h + target_size, :]
+        label = label[..., crop_h:crop_h + target_size, :]
     
-    return image, label.squeeze(0) if label.dim() == 3 else label
+    # Handle width
+    if w < target_size:
+        padding_w = target_size - w
+        pads = [0, 0, padding_w, 0]  # [left, top, right, bottom]
+        image = pad(image, pads, padding_mode='edge')
+        label = pad(label, pads, padding_mode='edge')
+    elif w > target_size:
+        crop_w = (w - target_size) // 2
+        image = image[:, :, crop_w:crop_w + target_size]
+        label = label[..., :, crop_w:crop_w + target_size]
+    
+    assert image.min() > 0, "Image contains zeros after transformation"
+    return image, label
 def shuffle_pixel(image, label):
     """
     Shuffles the pixels of the image and label in the same order.
@@ -80,13 +82,12 @@ def shuffle_pixel(image, label):
     image_flat = image.reshape(image.shape[0], -1)
     label_flat = label.reshape(label.shape[0], -1)
     
-    # mask the no data values
-    mask = (label_flat == -1).squeeze()
-    # mask pixels where either label or any band in image is -1
-    image_mask = (image_flat <= 0).any(dim=0)
-    mask = mask | image_mask
-    image_flat = image_flat[...,~mask]
-    label_flat = label_flat[...,~mask]
+    valid_label = (label_flat > 0).squeeze()  # Valid label pixels
+    valid_image = (image_flat > 0).all(dim=0)  # All image bands must be > 0
+    valid_mask = valid_label & valid_image  # Combine masks with AND operation
+
+    image_flat = image_flat[:,valid_mask]
+    label_flat = label_flat[:,valid_mask]
 
     # Shuffle the pixels
     perm = np.random.permutation(image_flat.shape[-1])
@@ -167,7 +168,7 @@ class TiffDataset(Dataset):
             UNUSED_BAND = "-1"
             
             selected_bands = [UNUSED_BAND, "Blue", "Green", "Red", "NIR_Narrow", "SWIR1", "SWIR2", UNUSED_BAND, UNUSED_BAND]
-            # selected_bands = [UNUSED_BAND,"BLUE","GREEN","RED","NIR_NARROW","SWIR_1","SWIR_2",UNUSED_BAND,UNUSED_BAND,UNUSED_BAND]
+
             self._process_selected_bands(selected_bands)
         else:
             assert isinstance(selected_bands, list), "selected_bands must be a list of int."
@@ -259,9 +260,6 @@ class TiffDataset(Dataset):
             image = image.astype(np.float32)
             image = torch.from_numpy(image)
             
-            # Apply mask from the last band
-            mask = (image[-1] != 0).float()  # Convert boolean mask to float (1 for valid, 0 for invalid)
-            image = torch.where(mask.unsqueeze(0) == 1, image, -1)  # Set masked values to -1
             # select bands
             if self.selected_band_indices is not None:
                 image = image[self.selected_band_indices]

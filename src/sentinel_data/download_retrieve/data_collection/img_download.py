@@ -95,32 +95,81 @@ evalscript_true_color = """
 10 - Cirrus
 11 - Snow / Ice
 """
+# evalscript_hls = """
+#     //VERSION=3
+#     function setup() {
+#         return {
+#             input: [{
+#                 bands: ["CoastalAerosol", "Blue", "Green", "Red", "NIR_Narrow", "SWIR1", "SWIR2", "Cirrus","dataMask"],
+#                 units: "DN"  
+#             }],
+#             output: {
+#                 bands: 9,
+#                 sampleType: "FLOAT32" 
+#             }
+#         };
+#     }
+#     function evaluatePixel(sample) {
+#         return [sample.CoastalAerosol,
+#                 sample.Blue,
+#                 sample.Green,
+#                 sample.Red,
+#                 sample.NIR_Narrow,
+#                 sample.SWIR1,
+#                 sample.SWIR2,
+#                 sample.Cirrus,
+#                 sample.dataMask]
+#     }
+#     """
+    
 evalscript_hls = """
     //VERSION=3
     function setup() {
         return {
             input: [{
-                bands: ["CoastalAerosol", "Blue", "Green", "Red", "NIR_Narrow", "SWIR1", "SWIR2", "Cirrus","dataMask"],
-                units: "DN"  
+                bands: [
+                    "CoastalAerosol", "Blue", "Green", "Red", "NIR_Narrow", "SWIR1", "SWIR2",
+                    "Cirrus", "QA", "Fmask"  // Added QA and Fmask bands for better cloud masking
+                ],
+                units: "REFLECTANCE"  // Changed to REFLECTANCE
             }],
             output: {
-                bands: 9,
+                bands: 11,  // Updated number of bands
                 sampleType: "FLOAT32" 
             }
         };
     }
+
     function evaluatePixel(sample) {
-        return [sample.CoastalAerosol,
-                sample.Blue,
-                sample.Green,
-                sample.Red,
-                sample.NIR_Narrow,
-                sample.SWIR1,
-                sample.SWIR2,
-                sample.Cirrus,
-                sample.dataMask]
+        // Cloud masking using Fmask
+        // Fmask values: 0=clear, 1=water, 2=cloud_shadow, 3=snow, 4=cloud
+        let isValid = sample.Fmask == 0 || sample.Fmask == 1;  // Only keep clear and water pixels
+        
+        // Additional check using Cirrus band
+        let isCirrus = sample.Cirrus > 0.01;  // Threshold for cirrus clouds
+        
+        // QA band check (specific bits for quality issues)
+        let qaGood = (sample.QA & 0x8000) === 0;  // Check if high quality bit is set
+        
+        // Create mask (1 for good pixels, 0 for bad pixels)
+        let mask = (isValid && !isCirrus && qaGood) ? 1 : 0;
+        
+        // Return masked reflectance values (divided by 10000 to get proper scale)
+        return [
+            sample.CoastalAerosol / 10000.0,
+            sample.Blue / 10000.0,
+            sample.Green / 10000.0,
+            sample.Red / 10000.0,
+            sample.NIR_Narrow / 10000.0,
+            sample.SWIR1 / 10000.0,
+            sample.SWIR2 / 10000.0,
+            sample.Cirrus / 10000.0,
+            sample.QA,
+            sample.Fmask,
+            mask
+        ];
     }
-    """
+"""
 def get_img_CLP(img_bbox, img_size, time_interval):
 
 
@@ -131,7 +180,7 @@ def get_img_CLP(img_bbox, img_size, time_interval):
                 data_collection=DataCollection.HARMONIZED_LANDSAT_SENTINEL,
                 time_interval=time_interval,
                 mosaicking_order=MosaickingOrder.LEAST_CC,
-                maxcc=0.4
+                maxcc=0.1
             )
         ],
         responses=[

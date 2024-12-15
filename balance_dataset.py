@@ -5,8 +5,8 @@ from tqdm import tqdm
 from pathlib import Path
 for mode in [ "test", "train", "val",]:
     # Directory containing training images and labels
-    train_images_dir = f"Running_Dataset/V2/raw/{mode}_images"
-    train_labels_dir = f"Running_Dataset/V2/raw/{mode}_labels"
+    train_images_dir = f"Running_Dataset/V2/raw_224/{mode}_images"
+    train_labels_dir = f"Running_Dataset/V2/raw_224/{mode}_labels"
     # Directory to save the balanced dataset
     balanced_dataset_dir = f"Running_Dataset/V2/balanced/{mode}_images"
     balanced_labels_dir = f"Running_Dataset/V2/balanced/{mode}_labels"
@@ -17,12 +17,10 @@ for mode in [ "test", "train", "val",]:
 
     # Dictionary to store pixels for each biomass range
     # Format: {range_key: [(pixel_value, image_file, x, y, original_biomass), ...]}
-    biomass_range_pixels = {
-        # "0-1": [], "1-2": [], "2-3": [], "3-4": [], "4-5": [], "5-6": []
-    }
+    biomass_range_pixels = {}
 
     def get_range_key(biomass_value):
-        if biomass_value < 10:  # Skip outliers
+        if biomass_value < 0:  # Skip outliers
             return None
         return f"{int(biomass_value)}-{int(biomass_value)+1}"
 

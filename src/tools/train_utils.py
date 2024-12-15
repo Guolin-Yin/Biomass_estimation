@@ -15,6 +15,19 @@ def compute_metrics(y_true, y_pred):
     mae = mean_absolute_error(y_true, y_pred)
     rmse = root_mean_squared_error(y_true, y_pred)
     return r2, mae, rmse
+# def compute_metrics(predictions, actuals):
+#     """
+#     Compute R² at both pixel and image levels, along with MAE and RMSE
+#     """
+#     predictions = np.array(predictions)
+#     actuals = np.array(actuals)
+    
+#     # Pixel-level metrics (over all valid pixels)
+#     pixel_r2 = r2_score(actuals, predictions)
+#     mae = mean_absolute_error(actuals, predictions)
+#     rmse = np.sqrt(mean_squared_error(actuals, predictions))
+    
+#     return pixel_r2, mae, rmse
 class EarlyStopping:
 	def __init__(self, patience=20, min_delta=0):
 		"""

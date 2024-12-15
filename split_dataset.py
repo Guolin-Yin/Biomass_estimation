@@ -3,6 +3,8 @@ from pathlib import Path
 import shutil
 import random
 
+import rasterio
+import numpy as np
 def split_dataset(
     data_dir: str,
     label_dir: str,
@@ -25,19 +27,32 @@ def split_dataset(
     
     # Get all image files
     image_files = list(Path(data_dir).glob(f"*{image_suffix}"))
+    filtered_image_files = []
+
+    # Filter images with negative values
+    for img_path in image_files:
+        with rasterio.open(img_path) as src:
+            image_data = src.read()
+
+            # if np.all(image_data[np.array([1,2,3,4,5,6])] > 0):
+            if image_data[np.array([1,2,3,4,5,6])].min() > 0:
+                filtered_image_files.append(img_path)
+            else:
+                print(f"Skipping {img_path.name} - contains negative values")
+
     random.seed(random_seed)
-    random.shuffle(image_files)
+    random.shuffle(filtered_image_files)
     
     # Calculate split indices
-    n_samples = len(image_files)
+    n_samples = len(filtered_image_files)
     train_end = int(n_samples * train_ratio)
     val_end = int(n_samples * (train_ratio + val_ratio))
     
     # Split files
     splits = {
-        'train': image_files[:train_end],
-        'val': image_files[train_end:val_end],
-        'test': image_files[val_end:]
+        'train': filtered_image_files[:train_end],
+        'val': filtered_image_files[train_end:val_end],
+        'test': filtered_image_files[val_end:]
     }
     
     # Copy files to respective directories
@@ -52,19 +67,31 @@ def split_dataset(
                 print(f"Warning: Label file not found for {img_path.name}")
                 continue
             
-            # Copy image and label to respective directories
+            # Read and process image
+            with rasterio.open(img_path) as src:
+                image_data = src.read()
+                c,h,w = image_data.shape
+                if image_data[np.array([1,2,3,4,5,6])].min() == 0:
+                    print('Skipping', img_path.name)
+                    continue
+                if h < 224 - 5 or w < 224 - 5:
+                    print('Skipping', img_path.name)
+                    continue
+            
+            # Copy label file
             shutil.copy2(img_path, output_path / f"{split}_images" / img_path.name)
             shutil.copy2(label_path, output_path / f"{split}_labels" / label_path.name)
+
 
 if __name__ == "__main__":
     # Example usage
     split_dataset(
         data_dir="Dataset/V2/data",
         label_dir="Dataset/V2/labels",
-        output_dir="Running_Dataset/V2/raw",
-        train_ratio=0.7,
-        val_ratio=0.15,
-        test_ratio=0.15,
+        output_dir="Running_Dataset/V2/raw_224",
+        train_ratio=0.9,
+        val_ratio=0.05,
+        test_ratio=0.05,
         image_suffix='.tiff',
         label_suffix='_label.tiff'
     )

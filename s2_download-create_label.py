@@ -408,54 +408,54 @@ if __name__ == "__main__":
     img_dir = Path('./Dataset/V2/data')
     img_dir.mkdir(parents=True, exist_ok=True)
     csv_files = list(csv_folder.glob('**/*.csv'))
-    # counter = 0
-    # for csv_file in csv_files:
-    #     date = extract_gedi_date(csv_file)
+    counter = 0
+    for csv_file in csv_files:
+        date = extract_gedi_date(csv_file)
 
-    #     # Example usage:
-    #     l4adf = pd.read_csv(csv_file)
+        # Example usage:
+        l4adf = pd.read_csv(csv_file)
 
-    #     # Filter GEDI points
-    #     gedi_points = l4adf[
-    #         (l4adf['agbd'] > 0) &
-    #         (l4adf['lon_lowestmode'] >= filtered_bounds[0]) &
-    #         (l4adf['lon_lowestmode'] <= filtered_bounds[2]) &
-    #         (l4adf['lat_lowestmode'] >= filtered_bounds[1]) &
-    #         (l4adf['lat_lowestmode'] <= filtered_bounds[3]) 
-    #     ]
-    #     # Generate dates for 3 days before and 3 days after
-    #     date_start = date - dt.timedelta(days=3)
-    #     date_end = date + dt.timedelta(days=3)
+        # Filter GEDI points
+        gedi_points = l4adf[
+            (l4adf['agbd'] > 0) &
+            (l4adf['lon_lowestmode'] >= filtered_bounds[0]) &
+            (l4adf['lon_lowestmode'] <= filtered_bounds[2]) &
+            (l4adf['lat_lowestmode'] >= filtered_bounds[1]) &
+            (l4adf['lat_lowestmode'] <= filtered_bounds[3]) 
+        ]
+        # Generate dates for 3 days before and 3 days after
+        date_start = date - dt.timedelta(days=3)
+        date_end = date + dt.timedelta(days=3)
         
-    #     if len(gedi_points) == 0:
-    #         continue
-    #     # Get patches instead of full bounds
-    #     try:
-    #         patches, patch_point_counts = generate_patches_from_gedi_points(gedi_points, if_plot=True, csv_file_name=csv_file)
-    #     except Exception as e:
-    #         print(f"Error generating patches for {csv_file.stem}: {str(e)}")
-    #         continue
+        if len(gedi_points) == 0:
+            continue
+        # Get patches instead of full bounds
+        try:
+            patches, patch_point_counts = generate_patches_from_gedi_points(gedi_points, if_plot=True, csv_file_name=csv_file)
+        except Exception as e:
+            print(f"Error generating patches for {csv_file.stem}: {str(e)}")
+            continue
         
-    #     for patch_idx, (patch_bounds, patch_width, patch_height) in enumerate(patches):
-    #         f_name = f"{csv_file.stem}_patch_{patch_idx}"
+        for patch_idx, (patch_bounds, patch_width, patch_height) in enumerate(patches):
+            f_name = f"{csv_file.stem}_patch_{patch_idx}"
             
-    #         # check files exist
-    #         if (img_dir / f"{f_name}.tiff").exists():
-    #             continue
-    #         try:
-    #             process_satellite_data(
-    #                 patch_bounds, 
-    #                 patch_width, 
-    #                 patch_height, 
-    #                 (date_start, date_end), 
-    #                 img_dir,
-    #                 f_name
-    #             )
-    #             counter += patch_point_counts
-    #             print(f"Processed patch {patch_idx} for {csv_file.stem}, num patch points: {patch_point_counts}, total points: {counter}")
-    #         except Exception as e:
-    #             print(f"Error processing patch {patch_idx}: {str(e)}")
-    #             continue
+            # check files exist
+            if (img_dir / f"{f_name}.tiff").exists():
+                continue
+            try:
+                process_satellite_data(
+                    patch_bounds, 
+                    patch_width, 
+                    patch_height, 
+                    (date_start, date_end), 
+                    img_dir,
+                    f_name
+                )
+                counter += patch_point_counts
+                print(f"Processed patch {patch_idx} for {csv_file.stem}, num patch points: {patch_point_counts}, total points: {counter}")
+            except Exception as e:
+                print(f"Error processing patch {patch_idx}: {str(e)}")
+                continue
 
 
     for i, hls_image in enumerate(img_dir.glob('**/*.tiff')):

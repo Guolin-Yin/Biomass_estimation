@@ -131,24 +131,29 @@ class Trainer:
 		with open(settings_path, 'w') as f:
 			json.dump(settings, f, indent=4)
 
-	def _save_checkpoint(self, epoch, val_loss):
-		checkpoint_path = self.checkpoint_dir / f'epoch={epoch}_loss={val_loss:.4f}.pt'
+	def _save_checkpoint(self, epoch, val_loss, r2):
+		checkpoint_path = self.checkpoint_dir / f'epoch={epoch}_loss={val_loss:.4f}_r2={r2:.4f}.pt'
 		checkpoint = {
 			'epoch': epoch,
 			'model_state_dict': self.model.state_dict(),
 			'optimizer_state_dict': self.optimizer.state_dict(),
-			'val_loss': val_loss
+			'val_loss': val_loss,
+			'r2': r2
 		}
 		torch.save(checkpoint, checkpoint_path)
 
-  
 		# Maintain top 3 models with the lowest validation loss
-		self.top_models.append((checkpoint_path, val_loss))
-		self.top_models = sorted(self.top_models, key=lambda x: x[1])
+		# self.top_models.append((checkpoint_path, val_loss))
+		# self.top_models = sorted(self.top_models, key=lambda x: x[1])
 
+		# Maintain top models with the highest R²
+		self.top_models.append((checkpoint_path, r2))
+		# Sort in descending order (higher R² is better)
+		self.top_models = sorted(self.top_models, key=lambda x: x[1], reverse=True)
 		# Remove models that are no longer in the top 3
 		while len(self.top_models) > self.max_saved_models:
-			model_to_remove = self.top_models.pop(3)[0]
+			# model_to_remove = self.top_models.pop(3)[0]
+			model_to_remove = self.top_models.pop(-1)[0]  # Remove the last (worst) model
 			if model_to_remove.exists():
 				model_to_remove.unlink()  # Use pathlib to remove the file
 
@@ -169,9 +174,23 @@ class Trainer:
 		if not checkpoints:
 			return None
 		checkpoints.sort(key=lambda x: int(x.stem.split('=')[1].split('_')[0]), reverse=True)
-		return checkpoints[0]
+		return checkpoints[2]
+	def compute_loss(self, x, y_pred, y_true):
+		if y_pred.__class__.__name__ == 'Tensor':
+			y_pred = y_pred.squeeze()
+			y_true = y_true.squeeze()
+		else:
+			y_pred = y_pred.output
+		# Apply mask to both predictions and ground truth
+		valid_mask_y = (y_true > 0)
+		valid_mask_x = (x > 0).all(dim=1)
+		valid_mask = valid_mask_y & valid_mask_x
+  
 
+		valid_predictions = y_pred[valid_mask]
+		valid_targets = y_true[valid_mask]
 
+		return self.loss_fn(valid_predictions, valid_targets), valid_mask, y_pred
 	def batch_forward_backward(self, 
 							data_loader, 
 							is_training=True, 
@@ -187,8 +206,7 @@ class Trainer:
 
 		# Initialize accumulators
 		# total_samples = 0
-		self.predictions = []
-		self.actuals = []
+		self.predictions, self.actuals, self.image_predictions, self.image_actuals = [], [], [], []
 		# Set no_grad context if it's validation (no backpropagation needed)
 		context_manager = torch.enable_grad() if is_training else torch.no_grad()
 
@@ -201,17 +219,10 @@ class Trainer:
 				if is_training:
 					self.optimizer.zero_grad()
 				# Forward pass
-				outputs = self.model(x)
-				# Access .output for terratorch ModelOutput type
-				predictions = outputs.output if hasattr(outputs, 'output') else outputs
-				
-				# Apply mask to both predictions and ground truth
-				valid_mask = (y != -1)
-				valid_predictions = predictions[valid_mask]
-				valid_targets = y[valid_mask]
 
-				# Compute loss only on valid points
-				loss = self.loss_fn(valid_predictions, valid_targets)
+				loss, valid_mask, y_pred = self.compute_loss(x, 
+                                         self.model(x), 
+                                         y)
 				if is_training:
 					loss.backward()
 					self.optimizer.step()
@@ -222,14 +233,32 @@ class Trainer:
 				if pbar:
 					pbar.set_postfix(step = batch_idx / len(data_loader), loss=total_loss / batch_idx)
 					pbar.update(1)
+				
+				# Get valid targets and predictions
+				valid_targets = y[valid_mask]
+				valid_predictions = y_pred[valid_mask]
+				# Store pixel-level predictions
 				self.actuals.extend(valid_targets.clone().detach().cpu().numpy().flatten())
 				self.predictions.extend(valid_predictions.clone().detach().cpu().numpy().flatten())
+				# Store image-level predictions (mean per image in batch)
+				if not (type(self.model).__name__ == 'TFCNN'):
+					for img_idx in range(y.size(0)):
+						img_mask = valid_mask[img_idx]
+						if img_mask.any():
+							img_pred_mean = valid_predictions.mean().item()
+							img_actual_mean = valid_targets.mean().item()
+							self.image_predictions.append(img_pred_mean)
+							self.image_actuals.append(img_actual_mean)
 		# Check for early stopping
 		# Compute average loss
 		avg_loss = total_loss / len(data_loader)
 		r2, mae, rmse = compute_metrics(self.actuals, self.predictions)
+		if not (type(self.model).__name__ == 'TFCNN'):
+			r2_image, mae_image, rmse_image = compute_metrics(self.image_actuals, self.image_predictions)
+			return avg_loss, r2_image, mae_image, rmse_image
+		else:
+			return avg_loss, r2, mae, rmse
 
-		return avg_loss, r2, mae, rmse
 	def train(self, num_epochs, run_test_at_the_end=False):
 		assert self.is_train, "Cannot train a test model."
 		for epoch in range(self.start_epoch, num_epochs+1):
@@ -241,7 +270,7 @@ class Trainer:
 			with tqdm(total=len(self.val_loader), desc="Validation", leave=False) as pbar:
 				val_loss, val_r2, val_mae, val_rmse = self.batch_forward_backward(self.val_loader, is_training=False, pbar = pbar)
       			# Save checkpoint
-			self._save_checkpoint(epoch, val_loss)
+			self._save_checkpoint(epoch, val_loss, val_r2)
 			self.logger.info(f"Epoch [{epoch}/{num_epochs}] completed." \
                             f"Avg Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, " \
                             f"Train R2: {train_r2:.4f}, Val R2: {val_r2:.4f}, " \
@@ -268,13 +297,23 @@ class Trainer:
 
 		# Save results to CSV
 		results_path = self.checkpoint_dir / 'test_results.csv'
-		df = pd.DataFrame({
+		df_pixels = pd.DataFrame({
 			'Actual': self.actuals,
 			'Predicted': self.predictions
 		})
-		df.to_csv(results_path, index=False)
-		# Calculate metrics
+		df_pixels.to_csv(results_path, index=False)
 		r2, mae, rmse = compute_metrics(self.actuals, self.predictions)
 		# Log metrics
 		self.logger.info(f"Test Results - R²: {r2:.4f}, RMSE: {rmse:.4f}, MAE: {mae:.4f}")
 		self.logger.info(f"Test results saved to {results_path}")
+
+		if not (type(self.model).__name__ == 'TFCNN'):
+			results_path_image = self.checkpoint_dir / 'test_results_image.csv'
+			df_image = pd.DataFrame({
+				'Actual': self.image_actuals,
+				'Predicted': self.image_predictions
+			})
+			df_image.to_csv(results_path_image, index=False)
+			r2_image, mae_image, rmse_image = compute_metrics(self.image_actuals, self.image_predictions)
+			self.logger.info(f"Test Results - R²: {r2_image:.4f}, RMSE: {rmse_image:.4f}, MAE: {mae_image:.4f}")
+			self.logger.info(f"Test results saved to {results_path_image}")
